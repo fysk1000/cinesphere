@@ -95,7 +95,7 @@ async function searchMovie() {
     const movies = await searchWithFallback(criterio);
 
     if (!movies.length) {
-      resultsEmpty.textContent = 'No se encontraron películas para tu búsqueda.';
+      resultsEmpty.textContent = 'No se encontraron películas para ese criterio.';
       resultsEmpty.classList.remove('hidden');
       resultSection.classList.remove('hidden');
       return;
@@ -106,8 +106,8 @@ async function searchMovie() {
     resultSection.classList.remove('hidden');
   } catch (err) {
     console.error('[CineSphere] Error al buscar películas:', err);
-    showFeedback('Ocurrió un error al consultar la API.', 'error');
-    resultsEmpty.textContent = 'Ocurrió un error al consultar la API.';
+    showFeedback('No se pudo conectar con el backend. Verifica que FastAPI esté corriendo en el puerto 8000.', 'error');
+    resultsEmpty.textContent = 'No se pudo contactar con el servidor.';
     resultsEmpty.classList.remove('hidden');
   } finally {
     setSearchLoading(false);
@@ -121,8 +121,11 @@ async function searchWithFallback(criterio) {
     const res = await fetch(`${API_BASE_URL}/peliculas/${encodeURIComponent(criterio)}`);
     console.log('[CineSphere] Respuesta /peliculas status:', res.status);
     if (res.ok) {
-      const data = await res.json().catch(() => []);
-      return Array.isArray(data) ? data : [];
+      const data = await res.json().catch(() => null);
+      if (Array.isArray(data)) return data;
+      if (data && Array.isArray(data.results)) return data.results;
+      if (data && Array.isArray(data.data)) return data.data;
+      return [];
     }
     if (res.status !== 404) {
       console.warn('[CineSphere] /peliculas devolvió error, intentando /pelicula:', res.status);
@@ -154,6 +157,7 @@ async function searchWithFallback(criterio) {
     console.error('[CineSphere] Error de red al llamar /pelicula:', err);
     throw err;
   }
+}
 
 function renderResultsGrid(movies) {
   resultsGrid.innerHTML = '';
@@ -164,9 +168,8 @@ function renderResultsGrid(movies) {
     const imgHtml = movie.image
       ? `<img src="${movie.image}" alt="${escapeHtml(movie.title)}" class="w-full h-64 object-cover" />`
       : '<div class="w-full h-64 bg-gray-700 flex items-center justify-center text-gray-500">Sin imagen</div>';
-    const rating = movie.rating != null ? movie.rating.toFixed(1) : null;
-    const ratingLabel = rating != null ? rating.toFixed(1) : 'Sin calificación';
-    const date = movie.release_date || 'Sin fecha';
+    const rating = movie.rating != null ? movie.rating.toFixed(1) : '-';
+    const date = movie.release_date || '-';
 
     card.innerHTML = `
       ${imgHtml}
@@ -175,7 +178,7 @@ function renderResultsGrid(movies) {
           <h3 class="font-semibold text-lg line-clamp-2">${escapeHtml(movie.title)}</h3>
           <div class="flex flex-wrap gap-2 mt-2 text-xs">
             <span class="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-yellow-500/10 text-yellow-300 border border-yellow-500/40">
-                ⭐ <span class="font-semibold">${ratingLabel}</span>
+              ⭐ <span class="font-semibold">${rating}</span>
             </span>
             <span class="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-blue-500/10 text-blue-200 border border-blue-500/40">
               📅 <span>${date}</span>
@@ -282,6 +285,7 @@ async function handleSaveFavorite(movie, notesInputEl, buttonEl) {
     buttonEl.disabled = false;
     buttonEl.textContent = originalText;
   }
+}
 
 // --- Modal de detalle ---
 
@@ -486,36 +490,49 @@ async function deleteFavorite(id) {
   }
 }
 
-// --- Eventos ---
+// --- Eventos (se ejecutan cuando el DOM está listo) ---
 
-searchBtn.addEventListener('click', searchMovie);
-searchInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') searchMovie(); });
-clearSearchBtn.addEventListener('click', () => {
-  searchInput.value = '';
-  resultsGrid.innerHTML = '';
-  resultSection.classList.add('hidden');
-  resultsEmpty.textContent = '';
-  resultsEmpty.classList.add('hidden');
-  hideFeedback();
-});
-refreshFavoritesBtn.addEventListener('click', () => { hideFeedback(); loadFavorites(); });
-
-// Cierre del modal
-movieModalClose.addEventListener('click', closeModal);
-movieModal.addEventListener('click', (e) => {
-  if (e.target === movieModal) {
-    closeModal();
+function initApp() {
+  if (!searchBtn || !searchInput) {
+    console.error('[CineSphere] No se encontraron los elementos de búsqueda (searchBtn/searchInput).');
+    return;
   }
-});
-window.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && !movieModal.classList.contains('hidden')) {
-    closeModal();
+  searchBtn.addEventListener('click', searchMovie);
+  searchInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') searchMovie(); });
+  if (clearSearchBtn) {
+    clearSearchBtn.addEventListener('click', () => {
+      searchInput.value = '';
+      resultsGrid.innerHTML = '';
+      resultSection.classList.add('hidden');
+      resultsEmpty.textContent = '';
+      resultsEmpty.classList.add('hidden');
+      hideFeedback();
+    });
   }
-});
+  if (refreshFavoritesBtn) {
+    refreshFavoritesBtn.addEventListener('click', () => { hideFeedback(); loadFavorites(); });
+  }
 
-// Cargar favoritos al abrir la página
-checkBackendHealth();
-loadFavorites();
+  // Cierre del modal
+  if (movieModalClose) movieModalClose.addEventListener('click', closeModal);
+  if (movieModal) {
+    movieModal.addEventListener('click', (e) => {
+      if (e.target === movieModal) closeModal();
+    });
+  }
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && movieModal && !movieModal.classList.contains('hidden')) closeModal();
+  });
+
+  checkBackendHealth();
+  loadFavorites();
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initApp);
+} else {
+  initApp();
+}
 
 // --- Health check básico del backend (/config) ---
 
